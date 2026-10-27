@@ -41,7 +41,7 @@ export const DEFAULT_LABEL_PROPS: LabelProps = {
   printDirection: "left",
   size: {
     width: 240,
-    height: 96,
+    height: 128, // 16 mm tape at 8 dots/mm
   },
 };
 
@@ -76,7 +76,7 @@ export const OBJECT_DEFAULTS_VECTOR = {
 export const OBJECT_DEFAULTS_TEXT = {
   ...OBJECT_DEFAULTS,
   fill: "black",
-  fontFamily: "Noto Sans Variable",
+  fontFamily: "Arial Rounded MT Bold", // installed with Windows/Office; prints well on the E1
   textAlign: "center" as fabric.TextboxProps["textAlign"],
   originX: "center" as fabric.TOriginX,
   originY: "center" as fabric.TOriginY,

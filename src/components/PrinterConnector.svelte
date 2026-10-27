@@ -17,7 +17,9 @@
     heartbeatFails,
     automation,
     rfidInfo,
+    e1Client,
   } from "$/stores";
+  import { E1Client } from "$/e1/e1_client";
   import type { ConnectionType } from "$/types";
   import { tr, type TranslationKey } from "$/utils/i18n";
   import MdIcon from "$/components/basic/MdIcon.svelte";
@@ -40,7 +42,50 @@
     return Math.min(Math.max(usage, 0), 100);
   };
 
+  const E1_LAST_KEY = "e1_last_used";
+  let useE1 = $state<boolean>(false);
+  let e1Firmware = $state<string[]>([]);
+
+  const onE1ConnectClicked = async (remembered?: BluetoothDevice) => {
+    const client = new E1Client();
+    connectionState.set("connecting");
+    try {
+      const info = remembered ? await client.reconnect(remembered) : await client.connect();
+      localStorage.setItem(E1_LAST_KEY, "1");
+      e1Firmware = info.firmware;
+      client.onDisconnect = () => {
+        e1Client.set(undefined);
+        connectionState.set("disconnected");
+        connectedPrinterName.set("");
+      };
+      e1Client.set(client);
+      connectedPrinterName.set(client.name);
+      connectionState.set("connected");
+    } catch (e) {
+      client.disconnect();
+      connectionState.set("disconnected");
+      if (remembered) console.warn("E1 auto-connect failed:", e);
+      else Toasts.error(e);
+    }
+  };
+
+  /** Reconnect to the E1 this browser was already allowed to use, without the device picker. */
+  const autoConnectE1 = async () => {
+    try {
+      const device = await E1Client.rememberedDevice();
+      if (device) {
+        useE1 = true;
+        await onE1ConnectClicked(device);
+      }
+    } catch (e) {
+      console.warn("E1 auto-connect unavailable:", e);
+    }
+  };
+
   const onConnectClicked = async () => {
+    if (useE1) {
+      return onE1ConnectClicked();
+    }
     initClient(connectionType);
     connectionState.set("connecting");
 
@@ -57,6 +102,10 @@
   };
 
   const onDisconnectClicked = () => {
+    if ($e1Client) {
+      $e1Client.disconnect();
+      return;
+    }
     $printerClient.disconnect();
   };
 
@@ -74,7 +123,9 @@
 
   const switchConnectionType = (c: ConnectionType) => {
     LocalStoragePersistence.saveLastConnectionType(c);
+    localStorage.removeItem(E1_LAST_KEY);
     connectionType = c;
+    useE1 = false;
   };
 
   const batteryIcon = (value: number): MaterialIcon => {
@@ -89,6 +140,12 @@
     featureSupport = Utils.getAvailableTransports();
 
     connectionType = LocalStoragePersistence.loadLastConnectionType() ?? "bluetooth";
+
+    if (localStorage.getItem(E1_LAST_KEY) === "1") {
+      useE1 = true;
+      autoConnectE1();
+      return;
+    }
 
     if (!featureSupport.capacitorBle && connectionType === "capacitor-ble") {
       connectionType = "bluetooth";
@@ -107,7 +164,12 @@
 </script>
 
 <div class="input-group w-auto input-group-sm flex-nowrap justify-content-end">
-  {#if $connectionState === "connected"}
+  {#if $connectionState === "connected" && $e1Client}
+    <span class="input-group-text" title={e1Firmware.join(" / ")}>
+      <MdIcon icon="bluetooth" />
+    </span>
+    <span class="input-group-text">MakeID {$connectedPrinterName}</span>
+  {:else if $connectionState === "connected"}
     <button class="btn btn-secondary" data-bs-toggle="dropdown" data-bs-auto-close="outside">
       <MdIcon icon="settings" />
     </button>
@@ -269,7 +331,14 @@
     {#if featureSupport.webBluetooth}
       <button
         disabled={$connectionState === "connecting"}
-        class="btn text-nowrap {connectionType === 'bluetooth' ? 'btn-light' : 'btn-outline-secondary'}"
+        class="btn text-nowrap {useE1 ? 'btn-light' : 'btn-outline-secondary'}"
+        onclick={() => (useE1 = true)}>
+        <MdIcon icon="label" />
+        MakeID E1
+      </button>
+      <button
+        disabled={$connectionState === "connecting"}
+        class="btn text-nowrap {connectionType === 'bluetooth' && !useE1 ? 'btn-light' : 'btn-outline-secondary'}"
         onclick={() => switchConnectionType("bluetooth")}>
         <MdIcon icon="bluetooth" />
         {$tr("connector.bluetooth")}

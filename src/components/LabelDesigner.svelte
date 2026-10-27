@@ -6,7 +6,16 @@
   import { Barcode } from "$/fabric-object/barcode";
   import { QRCode } from "$/fabric-object/qrcode";
   import { iconCodepoints, type MaterialIcon } from "$/styles/mdi_icons";
-  import { appConfig, automation, connectionState, csvData, loadedFonts } from "$/stores";
+  import {
+    appConfig,
+    automation,
+    connectionState,
+    csvData,
+    loadedFonts,
+    autoLength,
+    autoLengthMarginMm,
+    DOTS_PER_MM,
+  } from "$/stores";
   import {
     type ExportedLabelTemplate,
     type FabricJson,
@@ -38,6 +47,7 @@
   import { CustomCanvas } from "$/fabric-object/custom_canvas";
   import VectorParamsControls from "$/components/designer-controls/VectorParamsControls.svelte";
   import { CanvasUtils } from "$/utils/canvas_utils";
+  import { E1_HEAD_DOTS } from "$/e1/e1_client";
 
   let htmlCanvas: HTMLCanvasElement;
 
@@ -161,6 +171,66 @@
       Toasts.zodErrors(e, "Label parameters save error:");
     }
   };
+
+  /** Auto length: grow text boxes to their text and size the label to its content (continuous tape). */
+  const e1Margin = () => Math.round($autoLengthMarginMm * DOTS_PER_MM);
+  // Vertical center of each text box as the user placed it. Fabric briefly wraps text while typing and
+  // shifts the box when its height changes, so we restore this after every fit to stop it drifting.
+  const e1CenterY = new WeakMap<fabric.FabricObject, number>();
+  const fitE1Length = () => {
+    if (!fabricCanvas || !$autoLength || labelProps.printDirection !== "left") return;
+    const objects = fabricCanvas.getObjects();
+    for (const obj of objects) {
+      if (obj instanceof fabric.Textbox && !(obj as fabric.Textbox & { fontAutoSize?: boolean }).fontAutoSize) {
+        // hug the text; the margin pass below handles horizontal position
+        const cy = e1CenterY.get(obj) ?? obj.getCenterPoint().y;
+        obj.set({ width: 10_000 });
+        obj.initDimensions();
+        // Only Enter should start a new line: widen until Fabric makes no soft wraps (a trailing space
+        // isn't counted by calcTextWidth but still makes Fabric wrap, which looks like a line break).
+        const hardLines = obj.text.split("\n").length;
+        let width = Math.ceil(obj.calcTextWidth() + obj.fontSize * 0.6);
+        for (let i = 0; i < 20; i++) {
+          obj.set({ width });
+          obj.initDimensions();
+          if (obj.textLines.length <= hardLines) break;
+          width += Math.ceil(obj.fontSize * 0.5);
+        }
+        obj.setPositionByOrigin(new fabric.Point(obj.getCenterPoint().x, cy), "center", "center");
+        obj.setCoords();
+        e1CenterY.set(obj, cy);
+      }
+    }
+    // lay the content out from the left margin: label = margin + content + margin
+    const rects = objects.map((o) => o.getBoundingRect());
+    let contentWidth = 0;
+    if (rects.length > 0) {
+      const left = Math.min(...rects.map((r) => r.left));
+      const right = Math.max(...rects.map((r) => r.left + r.width));
+      const dx = e1Margin() - left;
+      if (Math.abs(dx) >= 1) {
+        for (const obj of objects) {
+          obj.set({ left: obj.left + dx });
+          obj.setCoords();
+        }
+      }
+      contentWidth = right - left;
+    }
+    const width = Math.max(Math.ceil(contentWidth) + 2 * e1Margin(), labelProps.size.height);
+    if (width === labelProps.size.width) {
+      fabricCanvas.requestRenderAll();
+      return;
+    }
+    labelProps = { ...labelProps, size: { ...labelProps.size, width } };
+    fabricCanvas.setDimensions(labelProps.size);
+    fabricCanvas.virtualZoom(fabricCanvas.getVirtualZoom());
+    fabricCanvas.requestRenderAll();
+    LocalStoragePersistence.saveLastLabelProps(labelProps);
+  };
+
+  $effect(() => {
+    if ($autoLength && $autoLengthMarginMm >= 0) fitE1Length();
+  });
 
   const exportCurrentLabel = (): ExportedLabelTemplate => {
     return FileUtils.makeExportedLabel(fabricCanvas!, labelProps, csvEnabled);
@@ -330,6 +400,13 @@
       const savedLabelProps = LocalStoragePersistence.loadLastLabelProps();
       if (savedLabelProps !== null) {
         labelProps = savedLabelProps;
+        // one-time: labels saved at the old 12 mm default move to the 16 mm tape default
+        if (localStorage.getItem("default_16mm_applied") !== "1") {
+          localStorage.setItem("default_16mm_applied", "1");
+          if (labelProps.size.height === 96) {
+            labelProps = { ...labelProps, size: { ...labelProps.size, height: DEFAULT_LABEL_PROPS.size.height } };
+          }
+        }
       }
     } catch (e) {
       Toasts.zodErrors(e, "Label parameters load error:");
@@ -340,6 +417,7 @@
       height: labelProps.size.height,
     });
     fabricCanvas.setLabelProps(labelProps);
+    fabricCanvas.setPrintableHeight(E1_HEAD_DOTS);
     fabricCanvas.onZoomChange = (z) => {
       zoomText = Math.round(z * 100) + "%";
     };
@@ -366,15 +444,22 @@
       }
     });
 
-    fabricCanvas.on("object:modified", (): void => {
+    fabricCanvas.on("object:modified", (e): void => {
+      // the user moved or resized it: take its new position as the one to keep
+      if (e.target) e1CenterY.delete(e.target);
+      fitE1Length();
       undo.push(fabricCanvas!, labelProps);
     });
 
     fabricCanvas.on("text:changed", () => {
+      fitE1Length();
       editRevision++;
     });
 
+    fabricCanvas.on("object:added", () => fitE1Length());    fabricCanvas.on("text:editing:exited", () => fitE1Length());
+
     fabricCanvas.on("object:removed", (): void => {
+      fitE1Length();
       undo.push(fabricCanvas!, labelProps);
     });
 
@@ -485,6 +570,28 @@
     <div class="col d-flex justify-content-center">
       <div class="toolbar d-flex flex-wrap gap-1 justify-content-center align-items-center">
         <LabelPropsEditor {labelProps} onChange={onUpdateLabelProps} />
+
+        <button
+          class="btn btn-sm {$autoLength ? 'btn-primary' : 'btn-secondary'}"
+          onclick={() => ($autoLength = !$autoLength)}
+          aria-pressed={$autoLength}
+          title="Auto length: label length follows its content (continuous tape)">
+          <MdIcon icon="straighten" /> Auto
+        </button>
+        {#if $autoLength}
+          <div class="input-group input-group-sm w-auto" title="Blank tape kept at each end (mm)">
+            <span class="input-group-text">Margin</span>
+            <input
+              type="number"
+              class="form-control"
+              style="width: 4.5em"
+              min="0"
+              max="20"
+              step="0.25"
+              bind:value={$autoLengthMarginMm} />
+            <span class="input-group-text">mm</span>
+          </div>
+        {/if}
 
         <button class="btn btn-sm btn-secondary" onclick={clearCanvas} title={$tr("editor.clear")}>
           <MdIcon icon="cancel_presentation" />

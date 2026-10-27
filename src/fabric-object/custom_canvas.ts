@@ -185,6 +185,29 @@ export class CustomCanvas extends fabric.Canvas {
     this.customBackground = value;
   }
 
+  /** Rows the print head can reach (centered across the label height); 0 = whole label. */
+  private printableHeight: number = 0;
+
+  setPrintableHeight(value: number) {
+    this.printableHeight = value;
+    this.requestRenderAll();
+  }
+
+  /** Shade the edges of the label the print head can't reach (e.g. 12 mm head on 16 mm tape). */
+  override _renderOverlay(ctx: CanvasRenderingContext2D) {
+    super._renderOverlay(ctx);
+    const h = this.height ?? 0;
+    if (!this.customBackground || this.printableHeight <= 0 || h <= this.printableHeight) {
+      return;
+    }
+    const band = (h - this.printableHeight) / 2;
+    ctx.save();
+    ctx.fillStyle = "rgba(160, 160, 160, 0.55)";
+    ctx.fillRect(0, 0, this.width ?? 0, band);
+    ctx.fillRect(0, h - band, this.width ?? 0, band);
+    ctx.restore();
+  }
+
   setHighlightMirror(value: boolean) {
     this.highlightMirror = value;
   }

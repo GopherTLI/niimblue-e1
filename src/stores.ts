@@ -28,6 +28,7 @@ import { APP_CONFIG_DEFAULTS, CSV_DEFAULT, OBJECT_DEFAULTS_TEXT } from "$/defaul
 import z from "zod";
 import { FileUtils } from "$/utils/file_utils";
 import { createPrinterInfo } from "@mmote/niimbluelib/dist/cjs/client/abstract_client";
+import type { E1Client } from "$/e1/e1_client";
 
 export const fontCache = writable<string[]>([OBJECT_DEFAULTS_TEXT.fontFamily]);
 export const appConfig = writablePersisted<AppConfig>("config", AppConfigSchema, APP_CONFIG_DEFAULTS);
@@ -44,6 +45,21 @@ export const rfidInfo = writable<CombinedRfidInfo>({});
 export const printerMeta = writable<PrinterModelMeta | undefined>();
 export const heartbeatFails = writable<number>(0);
 export const csvData = writablePersisted<CsvParams>("csv_params", CsvParamsSchema, { data: CSV_DEFAULT });
+/** Set while a MakeID E1 is connected; printing then goes to it instead of the NIIMBOT client. */
+export const e1Client = writable<E1Client | undefined>();
+/** Label length follows its content (for continuous tape). App-wide, remembered between visits. */
+export const autoLength = writable<boolean>(localStorage.getItem("auto_length") !== "0");
+autoLength.subscribe((v) => localStorage.setItem("auto_length", v ? "1" : "0"));
+/** Blank tape kept at each end by auto length, in mm. */
+export const autoLengthMarginMm = writable<number>(
+  (() => {
+    const v = parseFloat(localStorage.getItem("auto_length_margin_mm") ?? "");
+    return Number.isFinite(v) && v >= 0 ? v : 0.5;
+  })(),
+);
+autoLengthMarginMm.subscribe((v) => localStorage.setItem("auto_length_margin_mm", String(v)));
+/** Label dots per mm (NiimBlue and the E1 both use 203 dpi). */
+export const DOTS_PER_MM = 8;
 
 userFonts.subscribe(FileUtils.loadFonts);
 

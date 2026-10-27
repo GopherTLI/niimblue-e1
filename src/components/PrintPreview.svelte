@@ -1,7 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { derived } from "svelte/store";
-  import { connectionState, printerClient, printerMeta } from "$/stores";
+  import {
+    connectionState,
+    printerClient,
+    printerMeta,
+    e1Client,
+    autoLength,
+    autoLengthMarginMm,
+    DOTS_PER_MM,
+  } from "$/stores";
   import * as effects from "$/utils/post_process";
   import {
     type EncodedImage,
@@ -108,7 +116,51 @@
     FileUtils.printImageUrls(sources);
   };
 
+  /** E1 wants the label long side horizontal; turn a vertically designed label on its side. */
+  const e1Canvas = (): HTMLCanvasElement => {
+    if (previewCanvas.height <= previewCanvas.width) return previewCanvas;
+    const c = document.createElement("canvas");
+    c.width = previewCanvas.height;
+    c.height = previewCanvas.width;
+    const ctx = c.getContext("2d")!;
+    ctx.translate(c.width, 0);
+    ctx.rotate(Math.PI / 2);
+    ctx.drawImage(previewCanvas, 0, 0);
+    return c;
+  };
+
+  const onPrintE1 = async () => {
+    printState = "printing";
+    error = "";
+    try {
+      for (let pageIdx = 0; pageIdx < pagesTotal; pageIdx++) {
+        currentPage = pageIdx;
+        await generatePreviewData(currentPage);
+        for (let copy = 0; copy < quantity; copy++) {
+          await $e1Client!.printCanvas(e1Canvas(), {
+            trim: $autoLength,
+            trimMargin: Math.round(($autoLengthMarginMm || 0) * DOTS_PER_MM),
+            onProgress: (percents) => {
+              printProgress = { progressType: "send", percents };
+            },
+          });
+        }
+      }
+    } catch (e) {
+      error = `${e}`;
+      console.error(e);
+    }
+    printState = "idle";
+    printProgress = { progressType: "send", percents: 0 };
+    if (printNow && !error) {
+      modalRef.hide();
+    }
+  };
+
   const onPrint = async () => {
+    if ($e1Client) {
+      return onPrintE1();
+    }
     printState = "printing";
     error = "";
 
