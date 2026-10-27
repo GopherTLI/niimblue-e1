@@ -1,3 +1,5 @@
+> **This fork adds unofficial MakeID E1 label printer support.** See [E1_SUPPORT.md](E1_SUPPORT.md) for what's new and how to run it. Original project: [MultiMote/niimblue](https://github.com/MultiMote/niimblue).
+
 <div align="center">
 
 [![logo](about/logo.svg)](https://niim.blue)
