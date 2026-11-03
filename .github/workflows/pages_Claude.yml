@@ -1,8 +1,10 @@
 # Builds the app and publishes it to GitHub Pages (https://gophertli.github.io/niimblue-e1/),
-# so Android Chrome can install it with a Share menu entry. Run it from the Actions tab.
+# so Android Chrome can install it with a Share menu entry. Runs on every push to android-share.
 name: Deploy to GitHub Pages
 
 on:
+  push:
+    branches: [android-share]
   workflow_dispatch:
 
 permissions:
