@@ -48,6 +48,7 @@
   import VectorParamsControls from "$/components/designer-controls/VectorParamsControls.svelte";
   import { CanvasUtils } from "$/utils/canvas_utils";
   import { E1_HEAD_DOTS } from "$/e1/e1_client";
+  import { clearSharedText, parseShareSpec, readSharedText, type ShareSpec } from "$/e1/share_spec_Claude";
 
   let htmlCanvas: HTMLCanvasElement;
 
@@ -365,7 +366,77 @@
     return false;
   }
 
+  /** Build a label from text shared via Android's Share menu, then open the print preview. */
+  const loadSharedLabel = (spec: ShareSpec) => {
+    const canvas = fabricCanvas!;
+    const height = Math.round(spec.tapeMm * DOTS_PER_MM);
+    const band = Math.min(E1_HEAD_DOTS, height) - 4; // keep ink just off the edge of the head
+    const margin = e1Margin();
+    const fixedWidth = spec.lengthMm ? Math.round(spec.lengthMm * DOTS_PER_MM) : undefined;
+    autoLength.set(fixedWidth === undefined);
+    canvas.clear();
+    onUpdateLabelProps({ ...DEFAULT_LABEL_PROPS, size: { width: fixedWidth ?? height, height } });
+
+    let x = margin; // left edge of the space still free
+    if (spec.qr) {
+      const qr = new QRCode({ ...OBJECT_DEFAULTS, text: spec.qr, width: band, height: band, left: x, top: (height - band) / 2 });
+      canvas.add(qr);
+      x += band + DOTS_PER_MM;
+    }
+
+    if (spec.text) {
+      const lines = spec.text.split("\n").length;
+      let fontSize = spec.sizeMm
+        ? Math.round(spec.sizeMm * DOTS_PER_MM)
+        : (spec.sizeDots ?? Math.floor(band / (lines * 1.13))); // Fabric lines are 1.13 x fontSize tall
+      // The app's bundled font, since phones lack the PC default (Arial Rounded MT Bold)
+      const obj = LabelDesignerObjectHelper.addText(canvas, spec.text, {
+        fontSize,
+        textAlign: spec.align,
+        fontFamily: "Noto Sans Variable",
+        fontWeight: "bold",
+      });
+      const fit = () => {
+        obj.set({ fontSize, width: 10_000 });
+        obj.initDimensions();
+        obj.set({ width: Math.ceil(obj.calcTextWidth() + fontSize * 0.6) });
+        obj.initDimensions();
+      };
+      fit();
+      // on a fixed length, shrink the text until it fits beside the QR code
+      const free = fixedWidth !== undefined ? fixedWidth - margin - x : Infinity;
+      while (obj.width > free && fontSize > 8) {
+        fontSize--;
+        fit();
+      }
+      const left =
+        fixedWidth === undefined || spec.align === "left"
+          ? x
+          : spec.align === "right"
+            ? fixedWidth - margin - obj.width
+            : x + (free - obj.width) / 2;
+      obj.setPositionByOrigin(new fabric.Point(left + obj.width / 2, height / 2), "center", "center");
+      obj.setCoords();
+    }
+
+    fitE1Length();
+    canvas.requestRenderAll();
+    undo.push(canvas, labelProps);
+    openPreview();
+  };
+
   const loadDefaultLabel = async () => {
+    const shared = readSharedText();
+    if (shared !== null) {
+      clearSharedText();
+      const spec = parseShareSpec(shared);
+      if (spec) {
+        loadSharedLabel(spec);
+        return;
+      }
+      Toasts.error("Shared text has no label in it");
+    }
+
     const urlLoaded = await loadLabelFromUrl();
 
     if (urlLoaded) {

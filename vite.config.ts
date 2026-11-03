@@ -10,6 +10,7 @@ const getDate = (): string => {
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: process.env.VITE_BASE ?? "/", // "/niimblue-e1/" when built for GitHub Pages
   plugins: [svelte()],
   define: {
     __APP_VERSION__: JSON.stringify(process.env.COMMIT_TAG),

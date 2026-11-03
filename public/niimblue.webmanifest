@@ -12,8 +12,18 @@
       "sizes": "512x512"
     }
   ],
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "theme_color": "#212529",
-  "background_color": "#212529"
+  "background_color": "#212529",
+  "share_target": {
+    "action": "./",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }

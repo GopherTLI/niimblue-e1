@@ -9,6 +9,10 @@ import { configureFabric } from "$/defaults";
 
 configureFabric();
 
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw_Claude.js`).catch(console.error);
+}
+
 const app = mount(App, {
   target: document.getElementById("app")!,
 });
